@@ -57,7 +57,6 @@ main(int argc, char *argv[])
     socklen_t svsize = sizeof(struct sockaddr_in);
 
      /* Verifica o tipo de ponta a ser executada */
-    int clisock = -1;
     if(!strcmp(argv[1], "-s"))  //Ponta passiva (servidor)
     {
         printf("Ponta passiva (servidor)\n");
@@ -77,19 +76,6 @@ main(int argc, char *argv[])
         {
             printf("Erro! em listen.\n");
             return 1;
-        }
-        
-        /* Espera por conexoes se passivo */
-        if(!strcmp(argv[1], "-s"))
-        {
-            /* Aceita conexoes */
-            clisock = accept(sock, (struct sockaddr *) &serv, &svsize);
-            if(clisock < 0)
-            {
-                printf("Erro! em accept.\n");
-                return 1;
-            }
-printf("Cliente conectado %d.\n", clisock);
         }
     }
     else if(!strcmp(argv[1], "-c"))  //Ponta ativa (cliente)
@@ -120,9 +106,25 @@ printf("Cliente conectado %d.\n", clisock);
             printf("Erro! em connect.\n");
             return 1;
         }
+printf("Cliente conectado.\n");
     }
 
+    int clisock = -1;
     while(1)    {   //Executa ate
+        /* Espera por conexoes se passivo */
+        if(!strcmp(argv[1], "-s"))
+        {
+            /* Aceita conexoes */
+printf("Esperando conexoes.\n");
+            clisock = accept(sock, (struct sockaddr *) &serv, &svsize);
+            if(clisock < 0)
+            {
+                printf("Erro! em accept.\n");
+                return 1;
+            }
+printf("Conectou-se, %d.\n", clisock);
+        }
+
         /* Cria as threads de transmissao e recebimento */
         pthread_t receive, transmite;
         struct pthread_args recvarg, sendarg; //Argumentos das threads
@@ -152,18 +154,6 @@ printf("Cliente conectado %d.\n", clisock);
         {
             printf("O no remoto foi fechado.\n");
             return 1;
-        }
-        
-        /* Espera por conexoes se passivo */
-        if(!strcmp(argv[1], "-s"))
-        {
-            /* Aceita conexoes */
-            clisock = accept(sock, (struct sockaddr *) &serv, &svsize);
-            if(clisock < 0)
-            {
-                printf("Erro! em accept.\n");
-                return 1;
-            }
         }
     }
 
