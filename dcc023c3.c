@@ -55,6 +55,7 @@ main(int argc, char *argv[])
     }
     struct sockaddr_in serv;
     socklen_t svsize = sizeof(struct sockaddr_in);
+    serv.sin_family = AF_INET;
 
      /* Verifica o tipo de ponta a ser executada */
     if(!strcmp(argv[1], "-s"))  //Ponta passiva (servidor)
@@ -96,7 +97,7 @@ main(int argc, char *argv[])
             else
                 ip[i++] = aux;
         }
-
+printf("IP = %s, porta = %s.\n", ip, domain);
         serv.sin_port = htons(atoi(domain)); //Insere a porta
         inet_aton(ip, &serv.sin_addr);
         
