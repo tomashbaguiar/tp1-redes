@@ -19,7 +19,6 @@ struct pthread_args
 {
     int sock;
     char filename[100];
-    //char *filename;
 };
 
 /* Thread de retransmissao */
@@ -97,7 +96,6 @@ main(int argc, char *argv[])
             else
                 ip[i++] = aux;
         }
-printf("IP = %s, porta = %s.\n", ip, domain);
         serv.sin_port = htons(atoi(domain)); //Insere a porta
         inet_aton(ip, &serv.sin_addr);
         
@@ -107,7 +105,6 @@ printf("IP = %s, porta = %s.\n", ip, domain);
             printf("Erro! em connect.\n");
             return 1;
         }
-printf("Cliente conectado.\n");
     }
 
     int clisock = -1;
@@ -116,14 +113,12 @@ printf("Cliente conectado.\n");
         if(!strcmp(argv[1], "-s"))
         {
             /* Aceita conexoes */
-printf("Esperando conexoes.\n");
             clisock = accept(sock, (struct sockaddr *) &serv, &svsize);
             if(clisock < 0)
             {
                 printf("Erro! em accept.\n");
                 return 1;
             }
-printf("Conectou-se, %d.\n", clisock);
         }
 
         /* Cria as threads de transmissao e recebimento */
@@ -168,7 +163,6 @@ transmissor(void *arg)
 {
     /* Recupera os argumentos passados */
     struct pthread_args args = *((struct pthread_args *) arg);
-printf("Transmissor: --args = sock:%d:filename:%s.\n", args.sock, args.filename);
 
     /* Abre o arquivo para transmissao */
     FILE *filefd = fopen(args.filename, "rb");
@@ -194,8 +188,8 @@ printf("Transmissor: --args = sock:%d:filename:%s.\n", args.sock, args.filename)
 printf("Lido %hu bytes.\n", size);
 
         /* Cria quadro */
-        //uint8_t frame[0xffff + 0x001c];
-        uint8_t *frame = (uint8_t *) malloc((size + 14) * sizeof(uint8_t));
+        uint8_t frame[0xffff + 0x001c];
+        //uint8_t *frame = (uint8_t *) malloc((size + 14) * sizeof(uint8_t));
         memset(frame, 0, (size + 28));
         /* Campos de sincronizacao */
         frame[0] = 0xdc;
@@ -230,6 +224,7 @@ printf("Lido %hu bytes.\n", size);
         /* Codifica o quadro */
         char *sendFrame = encode16(frame, ((uint32_t) (size + (112 / 8))));
 printf("Enviando [%s].\n", sendFrame);
+        //free(frame);
 
         /* Envia o quadro para o no remoto */
         /*
@@ -248,7 +243,6 @@ printf("Enviando [%s].\n", sendFrame);
         reargs.sock = args.sock;
         reargs.frame = sendFrame;
         reargs.flag = &flag;
-printf("frame:%s:\n", sendFrame);
         if(pthread_create(&resend, NULL, &resender, (void *) &reargs) != 0)
         {
             printf("Erro! ao criar thread de reenvio.\n");
@@ -261,7 +255,6 @@ printf("frame:%s:\n", sendFrame);
         char recvFrame[0xffff + 0x000e];
         memset(recvFrame, 0x00, (0xffff + 0x000e));
         ssize_t recsize = recv(args.sock, (char *) recvFrame, 0x000e, 0);
-printf("Recebido [%s].\n", recvFrame);
         if(recsize == 0)    //O no remoto se desconectou
         {
             printf("Erro! No remoto se desconectou.\n");
@@ -277,6 +270,7 @@ printf("Recebido [%s].\n", recvFrame);
 
         /* Verifica a validade do quadro de confirmacao */
         uint8_t *convFrame = decode16(recvFrame, (uint32_t) recsize); //Decodifica o quadro recebido
+
         /* Verifica sincronizacao */
         uint8_t valido = 1;
         for(uint8_t i = 0; i < 2; i++)
@@ -307,7 +301,9 @@ printf("Recebido [%s].\n", recvFrame);
             nextID = (nextID == 0x00);
             flag = 1;
             pthread_join(resend, NULL); //Termina a thread de reenvio
+            free(sendFrame);
         }
+        free(convFrame);
     }
     while(!feof(filefd));
 
@@ -321,7 +317,6 @@ receiver(void *arg)
 {
     /* Recupera os argumentos passados */
     struct pthread_args args = *((struct pthread_args *) arg);
-printf("Receiver: --args = sock:%d:filename:%s.\n", args.sock, args.filename);
     
     /* Abre o arquivo para escrita */
     FILE *filefd = fopen(args.filename, "wb");
@@ -439,13 +434,14 @@ perror("recv-frame receiver");
             frame[9] = ((uint8_t) chksum);
 
             /* Codifica o quadro */
-            char *sendFrame = encode16(frame, (((uint32_t) (112 / 8))));
-printf("Enviando [%s].\n", sendFrame);
+            char *sendFrame = encode16((uint8_t *) frame, (((uint32_t) (112 / 8))));
             if(send(args.sock, (char *) sendFrame, 0x000e, 0) == -1)
             {
                 printf("Erro! ao reenviar confirmacao.\n");
                 return NULL;
             }
+            free(sendFrame);
+            free(convFrame);
         }
     }
     while(recsize == (0xffff + 0x000e)); //Recebe enquanto nao e o quadro final
@@ -460,7 +456,6 @@ resender(void *arg)
 {
     /* Recupera os argumentos passados */
     struct resend_args args = *((struct resend_args *) arg);
-printf("Sender: --args = sock:%d:flag:%d:frame:%s.\n", args.sock, *(args.flag), args.frame);
 
     /* Verifica validade do reenvio */
     while(*(args.flag) == 0)
@@ -481,32 +476,65 @@ printf("Enviando %s.\n", args.frame);
 
 char *encode16(uint8_t *buffer, uint32_t nsize)
 {
-printf("Para codificar [");
-for(uint32_t i = 0; i < nsize; i++)
-printf("%x", buffer[i]);
-printf("].\n");
-    char *coded = (char *) malloc(nsize * sizeof(char));
+    char *coded = (char *) malloc(2 * nsize * sizeof(char));
+    memset(coded, 0x00, (2 * nsize));
+printf("Codificando %x%x%x%x.\n", buffer[0], buffer[1], buffer[2], buffer[3]);
 
-    for(uint32_t i = 0; i < nsize; i++)
-        sprintf((char *) &coded[i], "%x", buffer[i]);
-printf("Codificado [%s].\n", coded);
+    uint64_t j = 0;
+    for(uint32_t i = 0; i < nsize; i++, j += 2)
+    {
+        //uint8_t value = buffer[i];
+        //uint8_t first = (value & 0xf0) >> 4;
+        //uint8_t second = (value & 0x0f); //<< 4;
+        char value[2];
+        sprintf(value, "%x", buffer[i]);
+        coded[j] = value[0];
+        coded[j + 1] = value[1];
+
+        /*
+        sprintf(&coded[j], "%x", first);
+        sprintf(&coded[j + 1], "%x", second);
+        j += 2;
+        */
+    }
+    //coded[j] = '\0';
 
     return coded;
 }
 
 uint8_t *decode16(char *buffer, uint32_t csize)
 {
-    uint8_t *decoded = (uint8_t *) malloc(csize * sizeof(uint8_t));
+    uint8_t *decoded = (uint8_t *) malloc((csize / 2) * sizeof(uint8_t));
+    memset(decoded, 0x00, (csize / 2));
 
-    for(uint32_t i = 0; i < csize; i++)    {
-        char data = buffer[i];
+    uint64_t j = 0;
+    for(uint32_t i = 0; i < (csize / 2); i++)    {
+        char first = buffer[j];
+        char second = buffer[j + 1];
+        uint8_t nib1 = 0x00;
+        uint8_t nib2 = 0x00;
 
-        if((data >= 'a') && (data <= 'f'))
-            decoded[i] = data - 97 + 10;
-        else if((data >= 'A') && (data <= 'F'))
-            decoded[i] = data - 65 + 10;
-        else if((data >= '0') && (data <= '9'))
-            decoded[i] = data - 48;
+        /* Primeiro nibble */
+        if((first >= 'a') && (first <= 'f'))
+            nib1 = (uint8_t) (first - 'a' + 10);
+        else if((first >= 'A') && (first <= 'F'))
+            nib2 = (uint8_t) (first - 'A' + 10);
+        else if((first >= '0') && (first <= '9'))
+            nib1 = (uint8_t) (first - '0');
+        nib1 = (nib1 & 0x0f) << 4;
+        
+        /* Segundo nibble */
+        if((second >= 'a') && (second <= 'f'))
+            nib2 = (uint8_t) (second - 'a' + 10);
+        else if((second >= 'A') && (second <= 'F'))
+            nib2 = (uint8_t) (second - 'A' + 10);
+        else if((second >= '0') && (second <= '9'))
+            nib2 = (uint8_t) (second - '0');
+        nib2 = (nib2 & 0x0f);
+
+        decoded[i] = nib1 + nib2;
+
+        j += 2;
     }
 
     return decoded;
@@ -529,5 +557,4 @@ uint16_t checksum(void *data, uint32_t bytes)
 
     return (~sum);
 }
-
 
