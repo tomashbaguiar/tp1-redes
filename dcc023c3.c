@@ -35,6 +35,8 @@ char *encode16(uint8_t*, uint32_t);
 uint8_t *decode16(char*, uint32_t);
 uint16_t checksum(void *data, uint32_t bytes);
 
+int out = 0;
+
 int
 main(int argc, char *argv[])
 {
@@ -143,10 +145,9 @@ main(int argc, char *argv[])
         }
 
         /* Espera o fim de execucao das threads */
-        int retval; //Retorno da thread
-        pthread_join(receive, (void **) &retval);
-        pthread_join(transmite, (void **) &retval);
-        if(retval == 1) //Verifica se o no remoto fechou-se
+        pthread_join(receive, NULL);
+        pthread_join(transmite, NULL);
+        if(out == 1) //Verifica se o no remoto fechou-se
         {
             printf("O no remoto foi fechado.\n");
             return 1;
@@ -188,43 +189,48 @@ transmissor(void *arg)
 printf("Lido %hu bytes.\n", size);
 
         /* Cria quadro */
-        uint8_t frame[0xffff + 0x001c];
-        //uint8_t *frame = (uint8_t *) malloc((size + 14) * sizeof(uint8_t));
-        memset(frame, 0, (size + 28));
+        uint8_t frameInit[0xffff + 0x001c];
+        //uint8_t *frameInit = (uint8_t *) malloc((size + 14) * sizeof(uint8_t));
+        memset(frameInit, 0, (size + 28));
         /* Campos de sincronizacao */
-        frame[0] = 0xdc;
-        frame[1] = 0xc0;
-        frame[2] = 0x23;
-        frame[3] = 0xc2;
-        frame[4] = 0xdc;
-        frame[5] = 0xc0;
-        frame[6] = 0x23;
-        frame[7] = 0xc2;
+        frameInit[4] = 0xdc;
+        frameInit[5] = 0xc0;
+        frameInit[6] = 0x23;
+        frameInit[7] = 0xc2;
+        frameInit[0] = 0xdc;
+        frameInit[1] = 0xc0;
+        frameInit[2] = 0x23;
+        frameInit[3] = 0xc2;
         /* Campo de tamanho */
         uint16_t tam = htons(size); //Converte para network-byte-order
-        frame[8] = ((uint8_t) (tam >> 8));
-        frame[9] = ((uint8_t) tam);
+        frameInit[8] = (tam >> 8);
+        frameInit[9] = (tam);
         /* Campo de checksum */
-        frame[10] = 0x00;
-        frame[11] = 0x00;
+        frameInit[10] = 0x00;
+        frameInit[11] = 0x00;
         /* Campo de ID */
         id = (id == 0x00);
-        frame[12] = id;
+        frameInit[12] = id;
         /* Campo de flag */
-        frame[13] = 0x00;
+        frameInit[13] = 0x00;
         /* Dados */
-        for(uint16_t i = 0; i < size; i++)
-            frame[i + 14] = read[i];
+        for(uint32_t i = 0; i < ((uint32_t) size); i++)
+            frameInit[i + 14] = read[i];
 
+printf("Antes: [0x%x%x%x%x].\n", frameInit[0], frameInit[1], frameInit[2], frameInit[3]);
+printf("length = %x %x.\n", frameInit[8], frameInit[9]);
         /* Calcula o checksum */
-        uint16_t chksum = checksum(frame, ((uint32_t) (size + (112 / 8))));
-        frame[8] = ((uint8_t) (chksum >> 8));
-        frame[9] = ((uint8_t) chksum);
+        uint16_t chksum = checksum(frameInit, ((uint32_t) (size + (112 / 8))));
+        frameInit[10] = ((uint8_t) (chksum >> 8));
+        frameInit[11] = ((uint8_t) chksum);
+printf("Antes: [0x%x%x%x%x].\n", frameInit[0], frameInit[1], frameInit[2], frameInit[3]);
+printf("length = %x %x.\n", frameInit[8], frameInit[9]);
 
         /* Codifica o quadro */
-        char *sendFrame = encode16(frame, ((uint32_t) (size + (112 / 8))));
-printf("Enviando [%s].\n", sendFrame);
-        //free(frame);
+        char *sendFrame = encode16(frameInit, ((uint32_t) (size + (112 / 8))));
+//printf("Enviando [%s].\n", sendFrame);
+printf("Lido %hu bytes.\n", size);
+        //free(frameInit);
 
         /* Envia o quadro para o no remoto */
         /*
@@ -246,7 +252,7 @@ printf("Enviando [%s].\n", sendFrame);
         if(pthread_create(&resend, NULL, &resender, (void *) &reargs) != 0)
         {
             printf("Erro! ao criar thread de reenvio.\n");
-            pthread_exit((void *) 3);
+            pthread_exit(NULL);
             return NULL;
         }
 
@@ -258,13 +264,14 @@ printf("Enviando [%s].\n", sendFrame);
         if(recsize == 0)    //O no remoto se desconectou
         {
             printf("Erro! No remoto se desconectou.\n");
-            pthread_exit((void *) 1);
+            out = 1;
+            pthread_exit(NULL);
             return NULL;
         }
         else if(recsize == -1)
         {
             printf("Erro! no recebimento da confirmacao.\n");
-            pthread_exit((void *) 2);
+            pthread_exit(NULL);
             return NULL;
         }
 
@@ -342,7 +349,8 @@ printf("Recebido [%s].\n", recvFrame);
         if(recsize == 0)    //O no remoto se desconectou
         {
             printf("Erro! No remoto se desconectou.\n");
-            pthread_exit((void *) 1);
+            out = 1;
+            pthread_exit(NULL);
             return NULL;
         }
         else if(recsize == -1)
@@ -404,37 +412,37 @@ perror("recv-frame receiver");
         {
             /* Envia confirmacao de quadro ja recebido */
             /* Cria quadro */
-            uint8_t frame[0x000e];
-            memset(frame, 0, 0x000e);
+            uint8_t frameAck[0x000e];
+            memset(frameAck, 0, 0x000e);
             /* Campos de sincronizacao */
-            frame[0] = 0xdc;
-            frame[1] = 0xc0;
-            frame[2] = 0x23;
-            frame[3] = 0xc2;
-            frame[4] = 0xdc;
-            frame[5] = 0xc0;
-            frame[6] = 0x23;
-            frame[7] = 0xc2;
+            frameAck[0] = 0xdc;
+            frameAck[1] = 0xc0;
+            frameAck[2] = 0x23;
+            frameAck[3] = 0xc2;
+            frameAck[4] = 0xdc;
+            frameAck[5] = 0xc0;
+            frameAck[6] = 0x23;
+            frameAck[7] = 0xc2;
             /* Campo de tamanho */
             uint16_t tam = htons(0x0000); //Converte para network-byte-order
-            frame[8] = ((uint8_t) (tam >> 8));
-            frame[9] = ((uint8_t) tam);
+            frameAck[8] = ((uint8_t) (tam >> 8));
+            frameAck[9] = ((uint8_t) tam);
             /* Campo de checksum */
-            frame[10] = 0x00;
-            frame[11] = 0x00;
+            frameAck[10] = 0x00;
+            frameAck[11] = 0x00;
             /* Campo de ID */
             //id = (id == 0x00);
-            frame[12] = lastID;
+            frameAck[12] = lastID;
             /* Campo de flag */
-            frame[13] = 0x80;
+            frameAck[13] = 0x80;
 
             /* Calcula o checksum */
-            uint16_t chksum = checksum(frame, ((uint32_t) (112 / 8)));
-            frame[8] = ((uint8_t) (chksum >> 8));
-            frame[9] = ((uint8_t) chksum);
+            uint16_t chksum = checksum(frameAck, ((uint32_t) (112 / 8)));
+            frameAck[8] = ((uint8_t) (chksum >> 8));
+            frameAck[9] = ((uint8_t) chksum);
 
             /* Codifica o quadro */
-            char *sendFrame = encode16((uint8_t *) frame, (((uint32_t) (112 / 8))));
+            char *sendFrame = encode16((uint8_t *) frameAck, (((uint32_t) (112 / 8))));
             if(send(args.sock, (char *) sendFrame, 0x000e, 0) == -1)
             {
                 printf("Erro! ao reenviar confirmacao.\n");
@@ -461,6 +469,7 @@ resender(void *arg)
     while(*(args.flag) == 0)
     {
 printf("Enviando %s.\n", args.frame);
+
         /* Envia o quadro para o no remoto */
         if(send(args.sock, (char *) args.frame, strlen((char *) args.frame), 0) == -1)
         {
@@ -478,7 +487,6 @@ char *encode16(uint8_t *buffer, uint32_t nsize)
 {
     char *coded = (char *) malloc(2 * nsize * sizeof(char));
     memset(coded, 0x00, (2 * nsize));
-printf("Codificando %x%x%x%x.\n", buffer[0], buffer[1], buffer[2], buffer[3]);
 
     uint64_t j = 0;
     for(uint32_t i = 0; i < nsize; i++, j += 2)
@@ -486,8 +494,9 @@ printf("Codificando %x%x%x%x.\n", buffer[0], buffer[1], buffer[2], buffer[3]);
         //uint8_t value = buffer[i];
         //uint8_t first = (value & 0xf0) >> 4;
         //uint8_t second = (value & 0x0f); //<< 4;
-        char value[2];
-        sprintf(value, "%x", buffer[i]);
+        char value[3];
+        sprintf(value, "%02x", buffer[i]);
+        //sprintf(value, "%x", buffer[i]);
         coded[j] = value[0];
         coded[j + 1] = value[1];
 
@@ -540,9 +549,12 @@ uint8_t *decode16(char *buffer, uint32_t csize)
     return decoded;
 }
 
-uint16_t checksum(void *data, uint32_t bytes)
+uint16_t checksum(void *buffer, uint32_t bytes)
 {
     uint32_t sum = 0;
+
+    uint8_t *data = (uint8_t *) malloc(bytes * sizeof(uint8_t));
+    memcpy(data, buffer, bytes);
 
     while(bytes > 1)    {
         sum += (*(uint16_t *) data)++;
@@ -551,6 +563,9 @@ uint16_t checksum(void *data, uint32_t bytes)
 
     if(bytes > 0)
         sum += *((uint8_t *) data);
+
+    free(data);
+    data = NULL;
 
     while(sum >> 16)
         sum = (sum & 0xffff) + (sum >> 16);
